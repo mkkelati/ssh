@@ -1,0 +1,133 @@
+#!/bin/bash
+
+clear
+echo -e "\E[44;1;37m           UPDATE SSL TUNNEL TO TLS 1.3           \E[0m"
+echo ""
+
+# Check if stunnel is installed
+if [[ ! -e "/etc/stunnel/stunnel.conf" ]]; then
+    echo -e "\033[1;31mSSL TUNNEL IS NOT INSTALLED!\033[0m"
+    echo -e "\033[1;33mPlease install SSL Tunnel first.\033[0m"
+    sleep 3
+    exit 1
+fi
+
+# Check if stunnel is running
+if ! netstat -nltp | grep 'stunnel4' >/dev/null 2>&1; then
+    echo -e "\033[1;31mSSL TUNNEL IS NOT RUNNING!\033[0m"
+    echo -e "\033[1;33mPlease start SSL Tunnel first.\033[0m"
+    sleep 3
+    exit 1
+fi
+
+echo -e "\033[1;33mCurrent SSL Tunnel Configuration:\033[0m"
+echo -e "\033[1;32mPort: \033[1;37m$(netstat -nplt | grep 'stunnel' | awk {'print $4'} | cut -d: -f2 | xargs)"
+echo ""
+
+# Show current TLS version if available
+if grep -q "sslVersion" /etc/stunnel/stunnel.conf; then
+    current_version=$(grep "sslVersion" /etc/stunnel/stunnel.conf | awk '{print $NF}')
+    echo -e "\033[1;32mCurrent TLS Version: \033[1;37m$current_version"
+else
+    echo -e "\033[1;32mCurrent TLS Version: \033[1;37mDefault (likely TLS 1.2 or older)"
+fi
+
+echo ""
+echo -e "\033[1;33mThis will update your SSL Tunnel to:\033[0m"
+echo -e "\033[1;32m• TLS Version: \033[1;37mTLSv1.3"
+echo -e "\033[1;32m• Primary Cipher: \033[1;37mTLS_AES_256_GCM_SHA384"
+echo -e "\033[1;32m• Fallback Ciphers: \033[1;37mTLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_GCM_SHA256"
+echo -e "\033[1;32m• Disabled Protocols: \033[1;37mSSLv2, SSLv3, TLSv1.0, TLSv1.1, TLSv1.2"
+echo ""
+
+echo -ne "\033[1;32mDo you want to continue with the update? \033[1;33m[y/n]:\033[1;37m "
+read confirm
+
+if [[ "$confirm" != @(y|Y|yes|YES) ]]; then
+    echo -e "\n\033[1;31mUpdate cancelled.\033[0m"
+    sleep 2
+    exit 0
+fi
+
+echo ""
+echo -e "\033[1;32mStarting TLS 1.3 update...\033[0m"
+echo ""
+
+# Backup current configuration
+echo -e "\033[1;33mCreating backup of current configuration...\033[0m"
+cp /etc/stunnel/stunnel.conf /etc/stunnel/stunnel.conf.backup.$(date +%Y%m%d_%H%M%S)
+echo -e "\033[1;32m✓ Backup created\033[0m"
+
+# Get current port settings
+current_accept=$(grep 'accept' /etc/stunnel/stunnel.conf | awk '{print $NF}')
+current_connect=$(grep 'connect' /etc/stunnel/stunnel.conf | awk '{print $NF}')
+
+echo -e "\033[1;33mUpdating configuration to TLS 1.3...\033[0m"
+
+# Create new TLS 1.3 configuration
+cat > /etc/stunnel/stunnel.conf << EOF
+cert = /etc/stunnel/stunnel.pem
+client = no
+socket = a:SO_REUSEADDR=1
+socket = l:TCP_NODELAY=1
+socket = r:TCP_NODELAY=1
+sslVersion = TLSv1.3
+ciphersuites = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256
+options = NO_SSLv2
+options = NO_SSLv3
+options = NO_TLSv1
+options = NO_TLSv1_1
+options = NO_TLSv1_2
+options = CIPHER_SERVER_PREFERENCE
+options = PREFER_SERVER_CIPHERS
+
+[stunnel]
+connect = $current_connect
+accept = $current_accept
+EOF
+
+echo -e "\033[1;32m✓ Configuration updated\033[0m"
+
+# Regenerate certificate for TLS 1.3 compatibility
+echo -e "\033[1;33mGenerating new TLS 1.3 compatible certificate...\033[0m"
+openssl genrsa -out /etc/stunnel/key.pem 4096 >/dev/null 2>&1
+openssl req -new -x509 -key /etc/stunnel/key.pem -out /etc/stunnel/cert.pem -days 3650 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" >/dev/null 2>&1
+cat /etc/stunnel/cert.pem /etc/stunnel/key.pem > /etc/stunnel/stunnel.pem
+rm /etc/stunnel/cert.pem /etc/stunnel/key.pem >/dev/null 2>&1
+chmod 600 /etc/stunnel/stunnel.pem
+echo -e "\033[1;32m✓ Certificate regenerated\033[0m"
+
+# Restart stunnel service
+echo -e "\033[1;33mRestarting SSL Tunnel service...\033[0m"
+service stunnel4 restart >/dev/null 2>&1
+/etc/init.d/stunnel4 restart >/dev/null 2>&1
+
+# Verify the service is running
+sleep 2
+if netstat -nltp | grep 'stunnel4' >/dev/null 2>&1; then
+    echo -e "\033[1;32m✓ SSL Tunnel restarted successfully\033[0m"
+    echo ""
+    echo -e "\E[44;1;37m           TLS 1.3 UPDATE COMPLETED           \E[0m"
+    echo ""
+    echo -e "\033[1;32m✓ SSL Tunnel is now running with TLS 1.3\033[0m"
+    echo -e "\033[1;32m✓ Primary cipher suite: TLS_AES_256_GCM_SHA384\033[0m"
+    echo -e "\033[1;32m✓ All older TLS/SSL versions disabled\033[0m"
+    echo ""
+    echo -e "\033[1;33mYour HTTP Injector should now connect using TLS_AES_256_GCM_SHA384\033[0m"
+    echo -e "\033[1;33mPort: \033[1;37m$(netstat -nplt | grep 'stunnel' | awk {'print $4'} | cut -d: -f2 | xargs)\033[0m"
+    echo ""
+    echo -e "\033[1;36mNote: If you still see TLS_AES_128_GCM_SHA256, try:\033[0m"
+    echo -e "\033[1;36m1. Restart your HTTP Injector app\033[0m"
+    echo -e "\033[1;36m2. Clear app cache and reconnect\033[0m"
+    echo -e "\033[1;36m3. Some clients may prefer 128-bit ciphers for performance\033[0m"
+else
+    echo -e "\033[1;31m✗ Failed to restart SSL Tunnel\033[0m"
+    echo -e "\033[1;33mRestoring backup configuration...\033[0m"
+    cp /etc/stunnel/stunnel.conf.backup.$(date +%Y%m%d_%H%M%S) /etc/stunnel/stunnel.conf
+    service stunnel4 restart >/dev/null 2>&1
+    echo -e "\033[1;31mConfiguration restored from backup\033[0m"
+fi
+
+echo ""
+echo -ne "\033[1;32mPress Enter to continue...\033[1;37m "
+read

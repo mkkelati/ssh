@@ -600,7 +600,8 @@ SCOLOR='\033[0m'
 			echo -e "\n\033[1;33mPORTAS\033[1;37m: \033[1;32m$sslt"
 			echo ""
 			echo -e "\033[1;31m[\033[1;36m1\033[1;31m] \033[1;37m• \033[1;33mCHANGE PORT SSL TUNNEL\033[0m"
-			echo -e "\033[1;31m[\033[1;36m2\033[1;31m] \033[1;37m• \033[1;33mREMOVE SSL TUNNEL\033[0m"
+			echo -e "\033[1;31m[\033[1;36m2\033[1;31m] \033[1;37m• \033[1;33mUPDATE TO TLS 1.3\033[0m"
+			echo -e "\033[1;31m[\033[1;36m3\033[1;31m] \033[1;37m• \033[1;33mREMOVE SSL TUNNEL\033[0m"
 			echo -e "\033[1;31m[\033[1;36m0\033[1;31m] \033[1;37m• \033[1;33mCOME BACK\033[0m"
 			echo ""
 			echo -ne "\033[1;32mWHAT DO YOU WANT TO DO \033[1;33m?\033[1;37m "
@@ -633,6 +634,34 @@ SCOLOR='\033[0m'
 				fun_conexao
 			}
 			[[ "$resposta" = '2' ]] && {
+				echo -e "\033[1;32mUPDATING SSL TUNNEL TO TLS 1.3 !\033[0m"
+				update_tls13() {
+					# Backup current config
+					cp /etc/stunnel/stunnel.conf /etc/stunnel/stunnel.conf.backup
+					# Get current port settings
+					current_accept=$(grep 'accept' /etc/stunnel/stunnel.conf | awk '{print $NF}')
+					current_connect=$(grep 'connect' /etc/stunnel/stunnel.conf | awk '{print $NF}')
+					# Update to TLS 1.3 configuration
+					echo -e "cert = /etc/stunnel/stunnel.pem\nclient = no\nsocket = a:SO_REUSEADDR=1\nsocket = l:TCP_NODELAY=1\nsocket = r:TCP_NODELAY=1\nsslVersion = TLSv1.3\nciphersuites = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256\noptions = NO_SSLv2\noptions = NO_SSLv3\noptions = NO_TLSv1\noptions = NO_TLSv1_1\noptions = NO_TLSv1_2\noptions = CIPHER_SERVER_PREFERENCE\noptions = PREFER_SERVER_CIPHERS\n\n[stunnel]\nconnect = $current_connect\naccept = $current_accept" >/etc/stunnel/stunnel.conf
+					# Regenerate certificate for TLS 1.3
+					openssl genrsa -out /etc/stunnel/key.pem 4096 >/dev/null 2>&1
+					openssl req -new -x509 -key /etc/stunnel/key.pem -out /etc/stunnel/cert.pem -days 3650 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" >/dev/null 2>&1
+					cat /etc/stunnel/cert.pem /etc/stunnel/key.pem > /etc/stunnel/stunnel.pem
+					rm /etc/stunnel/cert.pem /etc/stunnel/key.pem >/dev/null 2>&1
+					chmod 600 /etc/stunnel/stunnel.pem
+				}
+				echo ""
+				fun_bar 'update_tls13'
+				echo ""
+				echo -e "\033[1;32mRESTARTING SSL TUNNEL WITH TLS 1.3!\n"
+				fun_bar 'service stunnel4 restart' '/etc/init.d/stunnel4 restart'
+				echo ""
+				netstat -nltp | grep 'stunnel4' >/dev/null && echo -e "\033[1;32mTLS 1.3 SUCCESSFULLY APPLIED!" || echo -e "\033[1;31mUNEXPECTED ERROR!"
+				sleep 3.5s
+				clear
+				fun_conexao
+			}
+			[[ "$resposta" = '3' ]] && {
 				echo -e "\033[1;32mREMOVING SSL TUNNEL !\033[0m"
 				del_ssl() {
 					service stunnel4 stop
@@ -704,27 +733,19 @@ SCOLOR='\033[0m'
 				echo -e "\n\033[1;32mCONFIGURING SSL TUNNEL !\033[0m"
 				echo ""
 				ssl_conf() {
-					echo -e "cert = /etc/stunnel/stunnel.pem\nclient = no\nsocket = a:SO_REUSEADDR=1\nsocket = l:TCP_NODELAY=1\nsocket = r:TCP_NODELAY=1\nsslVersion = TLSv1.3\nciphersuites = TLS_AES_256_GCM_SHA384\n\n[stunnel]\nconnect = 127.0.0.1:$portssl\naccept = ${porta}" >/etc/stunnel/stunnel.conf
+					echo -e "cert = /etc/stunnel/stunnel.pem\nclient = no\nsocket = a:SO_REUSEADDR=1\nsocket = l:TCP_NODELAY=1\nsocket = r:TCP_NODELAY=1\nsslVersion = TLSv1.3\nciphersuites = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256\noptions = NO_SSLv2\noptions = NO_SSLv3\noptions = NO_TLSv1\noptions = NO_TLSv1_1\noptions = NO_TLSv1_2\noptions = CIPHER_SERVER_PREFERENCE\noptions = PREFER_SERVER_CIPHERS\n\n[stunnel]\nconnect = 127.0.0.1:$portssl\naccept = ${porta}" >/etc/stunnel/stunnel.conf
 				}
 				fun_bar 'ssl_conf'
 				echo -e "\n\033[1;32mCREATING CERTIFICATE!\033[0m"
 				echo ""
 				ssl_certif() {
-					#crt='EC'
-					#openssl genrsa -out key.pem 2048 >/dev/null 2>&1
-					#(
-					#echo $crt
-					#echo $crt
-					#echo $crt
-					#echo $crt
-					#echo $crt
-					#echo $crt
-					#echo $crt
-					#) | openssl req -new -x509 -key key.pem -out cert.pem -days 1050 >/dev/null 2>&1
-					#cat cert.pem key.pem >>/etc/stunnel/stunnel.pem
-					#rm key.pem cert.pem >/dev/null 2>&1
 					sed -i 's/ENABLED=0/ENABLED=1/g' /etc/default/stunnel4
-					cd /etc/stunnel && wget https://raw.githubusercontent.com/januda-ui/DRAGON-VPS-MANAGER/main/Sistema/script/stunnel.pem && cd $HOME
+					# Generate TLS 1.3 compatible certificate
+					openssl genrsa -out /etc/stunnel/key.pem 4096 >/dev/null 2>&1
+					openssl req -new -x509 -key /etc/stunnel/key.pem -out /etc/stunnel/cert.pem -days 3650 -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost" >/dev/null 2>&1
+					cat /etc/stunnel/cert.pem /etc/stunnel/key.pem > /etc/stunnel/stunnel.pem
+					rm /etc/stunnel/cert.pem /etc/stunnel/key.pem >/dev/null 2>&1
+					chmod 600 /etc/stunnel/stunnel.pem
 				}
 				fun_bar 'ssl_certif'
 				echo -e "\n\033[1;32mSTARTING SSL TUNNEL !\033[0m"
